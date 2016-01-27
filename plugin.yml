@@ -1,0 +1,11 @@
+name: LuckyBattle
+main: org.Prison.Lucky.Main
+version: 1.0
+description: >
+             Lucky Battle plugin
+commands:
+  LB:
+    description: Staff Command
+  Leave:
+    description: Leave                                      
+                                        
