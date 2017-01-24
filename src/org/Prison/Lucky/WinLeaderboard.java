@@ -7,14 +7,13 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.Map.Entry;
 
-import org.Prison.Main.Leaderboard.CompareValues;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.block.Sign;
 
 public class WinLeaderboard {
 
-	@SuppressWarnings("deprecation")
+/*	@SuppressWarnings("deprecation")
 	public static Map<String,Integer> getLeaderboard(){
 		Map<String,Integer> moneys = new HashMap<String,Integer>();
 		CompareValues comp = new CompareValues(moneys);
@@ -60,6 +59,6 @@ public class WinLeaderboard {
 			return s.substring(0, 15);
 		}
 		return s;
-	}
+	} */
 }
 

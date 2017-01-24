@@ -6,8 +6,8 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 
-import net.citizensnpcs.api.event.NPCRightClickEvent;
 import net.md_5.bungee.api.ChatColor;
 
 import org.Prison.Lucky.Game.GameState;
@@ -54,7 +54,7 @@ public class Events implements Listener {
 		plugin = instance;
 	}
 	
-	@EventHandler
+/*	@EventHandler
 	public void npcClick(NPCRightClickEvent event){
 		int id = event.getNPC().getId();
 		if (id == 185){
@@ -70,13 +70,13 @@ public class Events implements Listener {
 			p.sendMessage("§e||-----------------------");
 			p.sendMessage("");
 		}
-	}
+	} */
 	
 	@EventHandler
 	public void signCreate(SignChangeEvent event){
 		Player p = event.getPlayer();
 		if (p.isOp() && event.getLine(0).equalsIgnoreCase("[lb queue]")){
-			Game.setLocation("Sign", event.getBlock().getLocation());
+			Game.getInstance().setLocation("Sign", event.getLine(1), event.getBlock().getLocation());
 			event.setLine(0, "§8[§6§lLucky§b§l Battle§8]");
 			event.setLine(1, "Click to join");
 			event.setLine(2, "the queue.");
@@ -88,8 +88,11 @@ public class Events implements Listener {
 	
 	@EventHandler
 	public void dropItem(PlayerDropItemEvent event){
-		if (Game.playerInGame(event.getPlayer())){
-			Game.items.add(event.getItemDrop().getUniqueId());
+		if (Game.getInstance().playerInGame(event.getPlayer())){
+			String arena = Game.getInstance().whichArena(event.getPlayer());
+			List<UUID> util = Game.getInstance().items.get(arena);
+			util.add(event.getItemDrop().getUniqueId());
+			Game.getInstance().items.put(arena, util);
 		}
 	}
 	
@@ -98,13 +101,19 @@ public class Events implements Listener {
 		Player p = event.getPlayer();
 		if (event.getAction() == Action.RIGHT_CLICK_BLOCK && p.hasPermission("LuckyBattle.join")){
 			Location loc = event.getClickedBlock().getLocation();
-			Location loc2 = Game.getLocation("Sign");
-			if (loc.getBlockX() == loc2.getBlockX() && loc.getBlockY() == loc2.getBlockY() && loc.getBlockZ() == loc2.getBlockZ()){
-				Game.addToQueue(p);
-				Sign s = (Sign) loc.getBlock().getState();
-				s.setLine(3, "§eIn queue: §b" + Game.inqueue.size());
-				s.update();
-				return;
+			for (String arena : Game.getInstance().getArenas()){
+				Location loc2 = Game.getInstance().getLocation("Sign", arena);
+				if (loc.getBlockX() == loc2.getBlockX() && loc.getBlockY() == loc2.getBlockY() && loc.getBlockZ() == loc2.getBlockZ()){
+					if (Game.getInstance().enabled.get(arena)){
+						Game.getInstance().addToQueue(p, arena);
+						Sign s = (Sign) loc.getBlock().getState();
+						s.setLine(3, "§eIn queue: §b" + Game.getInstance().inqueue.get(arena).size());
+						s.update();
+					}else{
+						p.sendMessage(Game.getInstance().tag + "§cArena disabled.");
+					}
+					return;
+				}
 			}
 		}
 	}
@@ -112,27 +121,27 @@ public class Events implements Listener {
 	public void playerMove(PlayerMoveEvent event){
 		Player p = event.getPlayer();
 		if (event.getTo().getBlockX() != event.getFrom().getBlockX() || event.getTo().getBlockZ() != event.getFrom().getBlockZ()){
-			if (Game.playerInGame(p)){
-				if (!Game.canMove){
+			if (Game.getInstance().playerInGame(p)){
+				if (!Game.getInstance().canMove){
 					event.setTo(event.getFrom());
 				}
 			}
 		}
-		if (!Game.watching.contains(p.getName()) && !Game.ingame.contains(p.getName())){
-			if (p.getWorld().getName().equals("PrisonMap") && (event.getTo().getBlockX() != event.getFrom().getBlockX() || event.getTo().getBlockZ() != event.getFrom().getBlockZ())){
-				if (p.getLocation().getBlock().getLocation().distance(new Location(Bukkit.getWorld("PrisonMap"), -311, 54, 242)) <= 25){
-					Game.watching.add(p.getName());
-				}
-			}
-		}else{
-			Location util = p.getLocation().clone().subtract(0, 1, 0);
-			Location util2 = p.getLocation().clone().subtract(0, 2, 0);
-			Location util3 = p.getLocation().clone().subtract(0, 2, 0);
-			if (util.getBlock().getType() != Material.SMOOTH_BRICK && util2.getBlock().getType() != Material.SMOOTH_BRICK && util3.getBlock().getType() != Material.SMOOTH_BRICK && util.getBlock().getType() != Material.STAINED_GLASS && util2.getBlock().getType() != Material.STAINED_GLASS && util3.getBlock().getType() != Material.STAINED_GLASS){
-				Game.watching.remove(p.getName());
-				if (Game.inqueue.contains(p.getName())){
-					p.sendMessage(Game.tag + ChatColor.YELLOW + "You left the spectating area, so you were removed from the queue.");
-					Game.inqueue.remove(p.getName());
+		for (String arena : Game.getInstance().getArenas()){
+			if (Game.getInstance().inqueue.get(arena).contains(p.getName())){
+				Location loc = Game.getInstance().getLocation("Mid", arena);
+				if (p.getWorld().getName().equals(loc.getWorld().getName())){
+					if (p.getLocation().distance(loc) > 30){
+						List<String> util = Game.getInstance().inqueue.get(arena);
+						util.remove(p.getName());
+						Game.getInstance().inqueue.put(arena, util);
+						p.sendMessage(Game.getInstance().tag + "§eYou left the spectating area so you were removed from the queue.");
+					}
+				}else{
+					List<String> util = Game.getInstance().inqueue.get(arena);
+					util.remove(p.getName());
+					Game.getInstance().inqueue.put(arena, util);
+					p.sendMessage(Game.getInstance().tag + "§eYou left the spectating area so you were removed from the queue.");
 				}
 			}
 		}
@@ -140,28 +149,29 @@ public class Events implements Listener {
 	
 	@EventHandler (priority = EventPriority.HIGHEST)
 	public void playerHitPlayer(EntityDamageByEntityEvent event){
-		if (event.getEntity() instanceof Player && event.getDamager() instanceof Player && Game.gs == GameState.FIGHT){
+		if (event.getEntity() instanceof Player && event.getDamager() instanceof Player){
 			Player p = (Player) event.getEntity();
 			Player damager = (Player) event.getDamager();
-			if (Game.playerInGame(p)){
+			if (Game.getInstance().playerInGame(p)){
+				if (Game.getInstance().getGameState(Game.getInstance().whichArena(p)) == GameState.FIGHT){
 				event.setCancelled(false);
 				double damage = event.getDamage(DamageModifier.BASE) + event.getDamage(DamageModifier.ARMOR) + event.getDamage(DamageModifier.BLOCKING) + event.getDamage(DamageModifier.MAGIC) + event.getDamage(DamageModifier.ABSORPTION);
-				Game.lastdamager.put(p.getName(), damager.getName());
-				if (Game.damageamount.containsKey(p.getName())){
-					if (Game.damageamount.get(p.getName()).containsKey(damager.getName())){
-						double d = Game.damageamount.get(p.getName()).get(damager.getName());
-						HashMap<String,Double> util = Game.damageamount.get(p.getName());
+				Game.getInstance().lastdamager.put(p.getName(), damager.getName());
+				if (Game.getInstance().damageamount.containsKey(p.getName())){
+					if (Game.getInstance().damageamount.get(p.getName()).containsKey(damager.getName())){
+						double d = Game.getInstance().damageamount.get(p.getName()).get(damager.getName());
+						HashMap<String,Double> util = Game.getInstance().damageamount.get(p.getName());
 						util.put(damager.getName(), d + damage);
-						Game.damageamount.put(p.getName(), util);
+						Game.getInstance().damageamount.put(p.getName(), util);
 					}else{
 						HashMap<String,Double> util = new HashMap<>();
 						util.put(damager.getName(), damage);
-						Game.damageamount.put(p.getName(), util);
+						Game.getInstance().damageamount.put(p.getName(), util);
 					}
 				}else{
 					HashMap<String,Double> util = new HashMap<>();
 					util.put(damager.getName(), damage);
-					Game.damageamount.put(p.getName(), util);
+					Game.getInstance().damageamount.put(p.getName(), util);
 				}
 				if (damager.getFoodLevel() < 20){
 					damager.setFoodLevel(damager.getFoodLevel() + 2);
@@ -169,32 +179,35 @@ public class Events implements Listener {
 				if (p.getHealth() - damage <= 0.5){
 					event.setCancelled(true);
 					p.damage(0.0);
-					Game.Die(p, damager);
+					Game.getInstance().Die(p, damager, Game.getInstance().whichArena(p));
 				}
+			}
 			}
 		}
 		if (event.getDamager() instanceof Projectile && event.getEntity() instanceof Player){
-			if (event.getDamager() instanceof Arrow){	
+			if (event.getDamager() instanceof Arrow){
 				Player p = (Player) event.getEntity();
+				if (Game.getInstance().playerInGame(p)){
+					if (Game.getInstance().getGameState(Game.getInstance().whichArena(p)) == GameState.FIGHT){
 				Projectile a = (Arrow) event.getDamager();
 				Player damager = (Player) a.getShooter();
 				double damage = event.getDamage(DamageModifier.BASE) + event.getDamage(DamageModifier.ARMOR) + event.getDamage(DamageModifier.BLOCKING) + event.getDamage(DamageModifier.MAGIC) + event.getDamage(DamageModifier.ABSORPTION);
-				Game.lastdamager.put(p.getName(), damager.getName());
-				if (Game.damageamount.containsKey(p.getName())){
-					if (Game.damageamount.get(p.getName()).containsKey(damager.getName())){
-						double d = Game.damageamount.get(p.getName()).get(damager.getName());
-						HashMap<String,Double> util = Game.damageamount.get(p.getName());
+				Game.getInstance().lastdamager.put(p.getName(), damager.getName());
+				if (Game.getInstance().damageamount.containsKey(p.getName())){
+					if (Game.getInstance().damageamount.get(p.getName()).containsKey(damager.getName())){
+						double d = Game.getInstance().damageamount.get(p.getName()).get(damager.getName());
+						HashMap<String,Double> util = Game.getInstance().damageamount.get(p.getName());
 						util.put(damager.getName(), d + damage);
-						Game.damageamount.put(p.getName(), util);
+						Game.getInstance().damageamount.put(p.getName(), util);
 					}else{
 						HashMap<String,Double> util = new HashMap<>();
 						util.put(damager.getName(), damage);
-						Game.damageamount.put(p.getName(), util);
+						Game.getInstance().damageamount.put(p.getName(), util);
 					}
 				}else{
 					HashMap<String,Double> util = new HashMap<>();
 					util.put(damager.getName(), damage);
-					Game.damageamount.put(p.getName(), util);
+					Game.getInstance().damageamount.put(p.getName(), util);
 				}
 				if (damager.getFoodLevel() < 20){
 					damager.setFoodLevel(damager.getFoodLevel() + 2);
@@ -202,7 +215,9 @@ public class Events implements Listener {
 				if (p.getHealth() - damage <= 0.5){
 					event.setCancelled(true);
 					p.damage(0.0);
-					Game.Die(p, damager);
+					Game.getInstance().Die(p, damager, Game.getInstance().whichArena(p));
+				}
+			}
 				}
 			}
 		}
@@ -212,8 +227,8 @@ public class Events implements Listener {
 	public void entityDamge(EntityDamageEvent event){
 		if (event.getEntity() instanceof Player){
 			Player p = (Player) event.getEntity();
-			if (Game.playerInGame(p)){
-				if (Game.gs == GameState.WIN){
+			if (Game.getInstance().playerInGame(p)){
+				if (Game.getInstance().getGameState(Game.getInstance().whichArena(p)) == GameState.WIN){
 					event.setCancelled(true);
 				}else{
 					event.setCancelled(false);
@@ -222,14 +237,14 @@ public class Events implements Listener {
 					if (p.getHealth() - damage <= 0.5){
 						event.setCancelled(true);
 						p.damage(0.0);
-						if (Game.lastdamager.containsKey(p.getName())){
-							if (Bukkit.getPlayer(Game.lastdamager.get(p.getName())) != null){
-								Game.Die(p, Bukkit.getPlayer(Game.lastdamager.get(p.getName())));
+						if (Game.getInstance().lastdamager.containsKey(p.getName())){
+							if (Bukkit.getPlayer(Game.getInstance().lastdamager.get(p.getName())) != null){
+								Game.getInstance().Die(p, Bukkit.getPlayer(Game.getInstance().lastdamager.get(p.getName())), Game.getInstance().whichArena(p));
 							}else{
-								Game.Die(p, null);
+								Game.getInstance().Die(p, null, Game.getInstance().whichArena(p));
 							}
 						}else{
-							Game.Die(p, null);
+							Game.getInstance().Die(p, null, Game.getInstance().whichArena(p));
 						}
 					}
 				}
@@ -241,26 +256,30 @@ public class Events implements Listener {
 	@EventHandler
 	public void playerLeave(PlayerQuitEvent event){
 		Player p = event.getPlayer();
-		if (Game.inqueue.contains(p.getName())){
-			Game.inqueue.remove(p.getName());
+		for (String arena : Game.getInstance().getArenas()){
+		if (Game.getInstance().inqueue.get(arena).contains(p.getName())){
+			List<String> util = Game.getInstance().inqueue.get(arena);
+			util.remove(p.getName());
+			Game.getInstance().inqueue.put(arena, util);
 		}
-		if (Game.watching.contains(p.getName())){
-			Game.watching.remove(p.getName());
-		}
-		if (Game.ingame.contains(p.getName())){
+		if (Game.getInstance().ingame.get(arena).contains(p.getName())){
 			
-			if (Game.gs == GameState.WARMUP || Game.gs == GameState.PREPARE || Game.gs == GameState.FIGHT || Game.gs == GameState.WIN){
-				if (Game.gs == GameState.FIGHT){
+			if (Game.getInstance().getGameState(arena) == GameState.WARMUP || Game.getInstance().getGameState(arena) == GameState.PREPARE || Game.getInstance().getGameState(arena) == GameState.FIGHT || Game.getInstance().getGameState(arena) == GameState.WIN){
+				if (Game.getInstance().getGameState(arena) == GameState.FIGHT){
 					for (ItemStack item : p.getInventory().getContents()){
 						if (item != null && item.getType() != Material.AIR){
 							Item util = p.getWorld().dropItem(p.getLocation().clone().add(0, 0.2, 0), item);
-							Game.items.add(util.getUniqueId());
+							List<UUID> list = Game.getInstance().items.get(arena);
+							list.add(util.getUniqueId());
+							Game.getInstance().items.put(arena, list);
 						}
 					}
 					for (ItemStack item : p.getInventory().getArmorContents()){
 						if (item != null && item.getType() != Material.AIR){
 							Item util = p.getWorld().dropItem(p.getLocation().clone().add(0, 0.2, 0), item);
-							Game.items.add(util.getUniqueId());
+							List<UUID> list = Game.getInstance().items.get(arena);
+							list.add(util.getUniqueId());
+							Game.getInstance().items.put(arena, list);
 						}
 					}
 				}
@@ -270,18 +289,21 @@ public class Events implements Listener {
 				p.getInventory().setChestplate(null);
 				p.getInventory().setHelmet(null);
 				p.updateInventory();
-				p.getInventory().setContents(Game.invs.get(p.getName()));
-				p.getInventory().setArmorContents(Game.armors.get(p.getName()));
-				p.setLevel(Game.xpl.get(p.getName()));
-				p.setExp(Game.xp.get(p.getName()));
+				p.getInventory().setContents(Game.getInstance().invs.get(p.getName()));
+				p.getInventory().setArmorContents(Game.getInstance().armors.get(p.getName()));
+				p.setLevel(Game.getInstance().xpl.get(p.getName()));
+				p.setExp(Game.getInstance().xp.get(p.getName()));
 				p.updateInventory();
 				p.removePotionEffect(PotionEffectType.HEALTH_BOOST);
 				p.removePotionEffect(PotionEffectType.ABSORPTION);
 				p.removePotionEffect(PotionEffectType.REGENERATION);
-				p.teleport(Game.getLocation("Lobby"));
-				Game.ingame.remove(p.getName());
-				Game.sendToAll(Game.tag + ChatColor.RED  + p.getName() + ChatColor.YELLOW  + " left the game.");
+				p.teleport(Game.getInstance().getLocation("Lobby", arena));
+				List<String> list = Game.getInstance().ingame.get(arena);
+				list.remove(p.getName());
+				Game.getInstance().ingame.put(arena, list);
+				Game.getInstance().sendToAll(Game.getInstance().tag + ChatColor.RED  + p.getName() + ChatColor.YELLOW  + " left the Game.getInstance().", arena);
 			}
+		}
 		}
 	}
 	
@@ -290,22 +312,32 @@ public class Events implements Listener {
 	@EventHandler
 	public void blockBreak(BlockBreakEvent event){
 		Player p = event.getPlayer();
-		if (Game.playerInGame(p)){
-			if (Game.gs.equals(GameState.PREPARE)){
-				if(Files.getDataFile().getList("Luckies").contains(event.getBlock().getLocation().toVector())){
+		if (Game.getInstance().playerInGame(p)){
+			if (Game.getInstance().getGameState(Game.getInstance().whichArena(p)).equals(GameState.PREPARE)){
+				if(Files.getDataFile().getList(Game.getInstance().whichArena(p) + "Luckies").contains(event.getBlock().getLocation().toVector())){
 					if (event.getBlock().getType().equals(Material.GOLD_BLOCK)){
 						event.setCancelled(true);
 						event.getBlock().setType(Material.AIR);
-						List<LuckyBlockHandler> util = Game.luckyset.get(p.getName());
+						List<LuckyBlockHandler> util = Game.getInstance().luckyset.get(p.getName());
 						util.get(0).dropItem(event.getBlock().getLocation());
 						util.remove(0);
-						Game.luckyset.put(p.getName(), util);
+						Game.getInstance().luckyset.put(p.getName(), util);
 					}
 				}
 			}
-			if (Game.gs == GameState.FIGHT){
+			if (Game.getInstance().getGameState(Game.getInstance().whichArena(p)) == GameState.FIGHT){
 				Location loc = event.getBlock().getLocation();
-				if (loc.getBlockX() == -311 && loc.getBlockY() == 53 && loc.getBlockZ() == 242){
+				boolean go = false;
+				String arena = "";
+				for (String arena1 : Game.getInstance().getArenas()){
+					Location loc1 = Game.getInstance().getLocation("MidBlock", arena1);
+					if (loc.getBlockX() == loc1.getBlockX() && loc.getBlockY() == loc1.getBlockY() && loc.getBlockZ() == loc1.getBlockZ()){
+						go = true;
+						arena = arena1;
+						break;
+					}
+				}
+				if (go){
 					event.setCancelled(true);
 					event.getBlock().setType(Material.AIR);
 					int r = new Random().nextInt(8) + 1;
@@ -327,7 +359,9 @@ public class Events implements Listener {
 							double z = (-0.3 + (0.3 - -0.3) * new Random().nextDouble());
 							Zombie zomb = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
 							zomb.setVelocity(new Vector(x, 0.1, z));
-							Game.items.add(zomb.getUniqueId());
+							List<UUID> list = Game.getInstance().items.get(arena);
+							list.add(zomb.getUniqueId());
+							Game.getInstance().items.put(arena, list);
 						}
 						break;
 					case 4:
@@ -342,7 +376,9 @@ public class Events implements Listener {
 							double z = (-0.3 + (0.3 - -0.3) * new Random().nextDouble());
 							Skeleton skel = (Skeleton) loc.getWorld().spawnEntity(loc, EntityType.SKELETON);
 							skel.setVelocity(new Vector(x, 0.1, z));
-							Game.items.add(skel.getUniqueId());
+							List<UUID> list = Game.getInstance().items.get(arena);
+							list.add(skel.getUniqueId());
+							Game.getInstance().items.put(arena, list);
 						}
 						break;
 					case 6:
@@ -359,18 +395,24 @@ public class Events implements Listener {
 						item = new ItemStack(Material.DIAMOND_HELMET);
 						item2 = new ItemStack(Material.DIAMOND_CHESTPLATE);
 						Item util1 = loc.getWorld().dropItemNaturally(loc, new ItemStack(Material.DIAMOND_LEGGINGS));
-						Game.items.add(util1.getUniqueId());
+						List<UUID> list = Game.getInstance().items.get(arena);
+						list.add(util1.getUniqueId());
 						Item util2 = loc.getWorld().dropItemNaturally(loc, new ItemStack(Material.DIAMOND_BOOTS));
-						Game.items.add(util2.getUniqueId());	
+						list.add(util2.getUniqueId());
+						Game.getInstance().items.put(arena, list);
 						break;
 					}
 					if (item.getType() != Material.AIR){
 						Item util = loc.getWorld().dropItemNaturally(loc, item);
-						Game.items.add(util.getUniqueId());		
+						List<UUID> list = Game.getInstance().items.get(arena);
+						list.add(util.getUniqueId());
+						Game.getInstance().items.put(arena, list);		
 					}
 					if (item2.getType() != Material.AIR){
 						Item util =loc.getWorld().dropItemNaturally(loc, item2);
-						Game.items.add(util.getUniqueId());
+						List<UUID> list = Game.getInstance().items.get(arena);
+						list.add(util.getUniqueId());
+						Game.getInstance().items.put(arena, list);	
 					}
 				}
 			}

@@ -1,6 +1,7 @@
 package org.Prison.Lucky;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map.Entry;
@@ -8,10 +9,6 @@ import java.util.UUID;
 
 import net.md_5.bungee.api.ChatColor;
 
-import org.Prison.Main.Currency.MoneyAPI;
-import org.Prison.Main.InfoBoard.InfoBoard;
-import org.Prison.Main.Letter.LetterType;
-import org.Prison.Main.Traits.SpeedTrait;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -30,120 +27,153 @@ import org.bukkit.util.Vector;
 
 public class Game {
 	
+	public static Game instance;
+	
+	public static Game getInstance(){
+		if (instance == null){
+			instance = new Game();
+		}
+		return instance;
+	}
+	
 	public enum GameState {
 		WAITING, COUNTDOWN, WARMUP, PREPARE, FIGHT, WIN;
-		
-		public void setGameState(){
-			gs = this;
+	}
+	
+	public List<String> arenacache = null;
+	public HashMap<String,GameState> gs = new HashMap<String,GameState>();
+	public boolean canMove = true;
+	public HashMap<String,List<String>> ingame = new HashMap<>();
+	public HashMap<String,List<String>> inqueue = new HashMap<>();
+	public HashMap<String,ItemStack[]> invs = new HashMap<String,ItemStack[]>();
+	public HashMap<String,ItemStack[]> armors = new HashMap<String,ItemStack[]>();
+	public HashMap<String,Float> xp = new HashMap<String,Float>();
+	public HashMap<String,Integer> xpl = new HashMap<String,Integer>();
+	public HashMap<String,List<LuckyBlockHandler>> luckyset = new HashMap<>();
+	public HashMap<String,List<UUID>> items = new HashMap<>();
+	public HashMap<String,Boolean> enabled = new HashMap<>();
+	public String tag = "§8[§6§lLucky§b§lBattle§8]: ";
+	public HashMap<String,String> lastdamager = new HashMap<String,String>();
+	public HashMap<String,HashMap<String,Double>> damageamount = new HashMap<>();
+	
+	public GameState getGameState(String arena){
+		if (gs.get(arena) == null){
+			return GameState.WAITING;
+		}
+		return gs.get(arena);
+	}
+	
+	public List<String> getArenas(){
+		if (arenacache == null){
+			if (!Files.getDataFile().contains("Arenas")){
+				Files.getDataFile().set("Arenas", new ArrayList<String>());
+				Files.saveDataFile();
+				arenacache = new ArrayList<String>();
+				return new ArrayList<String>();
+			}else{
+				arenacache = Files.getDataFile().getStringList("Arenas");
+				return arenacache;
+			}
+		}else{
+			return arenacache;
 		}
 	}
-	
-	public static GameState gs = GameState.WAITING;
-	public static boolean canMove = true;
-	public static List<String> ingame = new ArrayList<String>();
-	public static List<String> inqueue = new ArrayList<String>();
-	public static List<String> watching = new ArrayList<String>();
-	public static HashMap<String,ItemStack[]> invs = new HashMap<String,ItemStack[]>();
-	public static HashMap<String,ItemStack[]> armors = new HashMap<String,ItemStack[]>();
-	public static HashMap<String,Float> xp = new HashMap<String,Float>();
-	public static HashMap<String,Integer> xpl = new HashMap<String,Integer>();
-	public static HashMap<String,List<LuckyBlockHandler>> luckyset = new HashMap<>();
-	public static List<UUID> items = new ArrayList<>();
-	public static String tag = "§8[§6§lLucky§b§lBattle§8]: ";
-	public static HashMap<String,String> lastdamager = new HashMap<String,String>();
-	public static HashMap<String,HashMap<String,Double>> damageamount = new HashMap<>();
-	
-	public static GameState getGameState(){
-	return gs;
-	}
-	
-	public static Location getLocation(String type){
-		Location loc = new Location(Bukkit.getWorld(Files.getDataFile().getString(type + ".world")), Files.getDataFile().getInt(type + ".x"), Files.getDataFile().getInt(type + ".y"), Files.getDataFile().getInt(type + ".z"));
+	public Location getLocation(String type, String arena){
+		Location loc = new Location(Bukkit.getWorld(Files.getDataFile().getString(arena + "locations." + type + ".world")), Files.getDataFile().getInt(arena + "locations." + type + ".x"), Files.getDataFile().getInt(arena + "locations." + type + ".y"), Files.getDataFile().getInt(arena + "locations." + type + ".z"));
 		return loc;
 	}
 	
-	public static void setLocation(String type, Location loc){
-		Files.getDataFile().set(type + ".world", loc.getWorld().getName());
-		Files.getDataFile().set(type + ".x", loc.getBlockX());
-		Files.getDataFile().set(type + ".y", loc.getBlockY());
-		Files.getDataFile().set(type + ".z", loc.getBlockZ());
+	public String whichArena(Player p){
+		for (Entry<String, List<String>> e : ingame.entrySet()){
+			if (e.getValue().contains(p.getName())){
+				return e.getKey();
+			}
+		}
+		return null;
+	}
+	
+	public void setLocation(String type, String arena, Location loc){
+		Files.getDataFile().set(arena + "locations." + type + ".world", loc.getWorld().getName());
+		Files.getDataFile().set(arena + "locations." + type + ".x", loc.getBlockX());
+		Files.getDataFile().set(arena + "locations." + type + ".y", loc.getBlockY());
+		Files.getDataFile().set(arena + "locations." + type + ".z", loc.getBlockZ());
 		Files.saveDataFile();
 	}
 	
-	public static void addToQueue(Player p){
-		if (inqueue.contains(p.getName())){
-			for (int i = 1; i <= inqueue.size(); i++){
-				if (inqueue.get(i - 1) == p.getName()){
-				p.sendMessage(Game.tag + "§eYou are §b" + i + "§e in queue.");
+	public void addToQueue(Player p, String arena){
+		if (inqueue.get(arena).contains(p.getName())){
+			for (int i = 1; i <= inqueue.get(arena).size(); i++){
+				if (inqueue.get(arena).get(i - 1) == p.getName()){
+				p.sendMessage(tag + "§eYou are §b" + i + "§e in queue.");
 				}
 			}
 		}else{
-		inqueue.add(p.getName());
-		p.sendMessage(tag + "§eYou are now §b" + inqueue.size() + "§e in queue.");
-		if (Game.gs == GameState.COUNTDOWN && inqueue.size() <= 4){
-			p.sendMessage(Game.tag + "§eThe countdown has already started. Game starting in §b" + GameManager.time + " §eseconds.");
+			List<String> util = inqueue.get(arena);
+			util.add(p.getName());
+			inqueue.put(arena, util);
+		p.sendMessage(tag + "§eYou are now §b" + inqueue.get(arena).size() + "§e in queue.");
+		if (getGameState(arena) == GameState.COUNTDOWN && inqueue.get(arena).size() <= 4){
+			p.sendMessage(tag + "§eThe countdown has already started. Game starting in §b" + GameManager.time.get(arena) + " §eseconds.");
 		}
 		}
 	}
 	
-	public static void sendToAllInQueue(String message){
+	public void sendToAllInQueue(String message, String arena){
 		for (int i = 1; i <= 4; i++){
-			if (i > inqueue.size()){
+			if (i > inqueue.get(arena).size()){
 				break;
 			}
-			Bukkit.getPlayer(inqueue.get(i - 1)).sendMessage(message);
+			Bukkit.getPlayer(inqueue.get(arena).get(i - 1)).sendMessage(message);
 		}
 	}
 	
-	public static void soundToAllInQueue(Sound sound){
+	public void soundToAllInQueue(Sound sound, String arena){
 		for (int i = 1; i <= 4; i++){
-			if (i > inqueue.size()){
+			if (i > inqueue.get(arena).size()){
 				break;
 			}
-			Player p = Bukkit.getPlayer(inqueue.get(i - 1));
+			Player p = Bukkit.getPlayer(inqueue.get(arena).get(i - 1));
 			p.playSound(p.getLocation(), sound, 1f, 1f);
 		}
 	}
 	
-	public static void sendToAll(String message){
-		for (String s : ingame){
+	public void sendToAll(String message, String arena){
+		for (String s : ingame.get(arena)){
 			Bukkit.getPlayer(s).sendMessage(message);
 		}
 	}
 	
-	public static void sendToAllPlus(String message){
+	public void sendToAllPlus(String message, String arena){
 		List<String> sent = new ArrayList<>();
-		for (String s : ingame){
+		for (String s : ingame.get(arena)){
 			if (!sent.contains(s)){
 			Bukkit.getPlayer(s).sendMessage(message);
 			sent.add(s);
 			}
 		}
-		for (String s : watching){
-			if (!sent.contains(s)){
-			sent.add(s);
-			Bukkit.getPlayer(s).sendMessage(message);
+		Location loc = getLocation("Mid", arena);
+		for (Player p : Bukkit.getOnlinePlayers()){
+			if (p.getWorld().getName().equals(loc.getWorld().getName())){
+				if (p.getLocation().distance(loc) < 35 && !sent.contains(p.getName())){
+					sent.add(p.getName());
+					Bukkit.getPlayer(p.getName()).sendMessage(message);
+				}
 			}
 		}
 	}
 	
-	public static void startGame(){
-		ScoreboardManager manager = Bukkit.getScoreboardManager();
-		Scoreboard board = manager.getMainScoreboard();
-		Objective health = board.registerNewObjective("LuckyHealth", "health");
-		health.setDisplayName("§c§l❤");
-		health.setDisplaySlot(DisplaySlot.BELOW_NAME);
+	public void startGame(String arena){
 		for (int i = 1; i <= 4; i++){
-			if (i > inqueue.size()){
+			if (i > inqueue.get(arena).size()){
 				break;
 			}
-			Player p = Bukkit.getPlayer(inqueue.get(i - 1));
+			Player p = Bukkit.getPlayer(inqueue.get(arena).get(i - 1));
 			p.setAllowFlight(false);
 			p.setFlying(false);
 			if (p.getGameMode() != GameMode.SURVIVAL){
 				p.setGameMode(GameMode.SURVIVAL);
 			}
-			Location loc = Game.getLocation("Spawn" + i).add(0.5, 1, 0.5);
+			Location loc = getLocation("Spawn" + i, arena).add(0.5, 1, 0.5);
 			p.teleport(loc);
 			p.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 10, 2));
 			p.addPotionEffect(new PotionEffect(PotionEffectType.HEALTH_BOOST, 100000, 9));
@@ -162,99 +192,59 @@ public class Game {
 			p.setWalkSpeed(0.2f);
 			ParticleEffect.FIREWORKS_SPARK.display(0.3f, 0.8f, 0.3f, 0.05f, 20, loc, 100);
 			luckyset.put(p.getName(), LuckyBlockHandler.getSet());
-			ingame.add(p.getName());
+			List<String> util = ingame.get(arena);
+			util.add(p.getName());
+			ingame.put(arena, util);
 			p.addPotionEffect(new PotionEffect(PotionEffectType.HEAL, 5, 50));
-			p.setScoreboard(board);
 			p.setHealth(p.getHealth());
 		}
-		inqueue.removeAll(ingame);
-		sendToAll(Game.tag + "§eGame starting.");
-		for (int i = 1; i <= inqueue.size(); i++){
-			int util = i - 1;
-			Player p = Bukkit.getPlayer(inqueue.get(util));
-			p.sendMessage(Game.tag + "§eA game has started, you have been moved to §b" + i + "§e in queue.");
+		List<String> util = inqueue.get(arena);
+		util.removeAll(ingame.get(arena));
+		inqueue.put(arena, util);
+		sendToAll(tag + "§eGame starting.", arena);
+		for (int i = 1; i <= inqueue.get(arena).size(); i++){
+			int util1 = i - 1;
+			Player p = Bukkit.getPlayer(inqueue.get(arena).get(util1));
+			p.sendMessage(tag + "§eA game has started, you have been moved to §b" + i + "§e in queue.");
 		}
 	}
 	
 	@SuppressWarnings("unchecked")
-	public static void trueStartGame(){
-		for (String s : ingame){
+	public void trueStartGame(String arena){
+		for (String s : ingame.get(arena)){
 			Player p = Bukkit.getPlayer(s);
 			
-			p.sendMessage(Game.tag + "§c§lFIGHT!");
+			p.sendMessage(tag + "§c§lFIGHT!");
 			p.setWalkSpeed(0.2f);
-			p.playSound(p.getLocation(), Sound.DIG_WOOD, 1f, 1f);
+			p.playSound(p.getLocation(), Sound.WOLF_GROWL, 1f, 1f);
 			p.playSound(p.getLocation(), Sound.ENDERDRAGON_GROWL, 1f, 1f);
 		}
-		for (Vector v : (List<Vector>) Files.getDataFile().getList("Luckies")){
-			Location loc = new Location(Bukkit.getWorld("PrisonMap"), v.getX(), v.getY(), v.getZ());
+		for (Vector v : (List<Vector>) Files.getDataFile().getList(arena + "Luckies")){
+			Location loc = new Location(Bukkit.getWorld("Flat"), v.getX(), v.getY(), v.getZ());
 			loc.getBlock().setType(Material.AIR);
 		}
-		List<Vector> util = new ArrayList<>();
-		//1
-		util.add(new Vector(-327, 49, 243));
-		util.add(new Vector(-327, 49, 242));
-		util.add(new Vector(-327, 49, 241));
-		util.add(new Vector(-327, 50, 243));
-		util.add(new Vector(-327, 50, 242));
-		util.add(new Vector(-327, 50, 241));
-		util.add(new Vector(-327, 51, 243));
-		util.add(new Vector(-327, 51, 242));
-		util.add(new Vector(-327, 51, 241));
-		util.add(new Vector(-327, 52, 242));
-		//2
-		util.add(new Vector(-310, 49, 258));
-		util.add(new Vector(-311, 49, 258));
-		util.add(new Vector(-312, 49, 258));
-		util.add(new Vector(-310, 50, 258));
-		util.add(new Vector(-311, 50, 258));
-		util.add(new Vector(-312, 50, 258));
-		util.add(new Vector(-310, 51, 258));
-		util.add(new Vector(-311, 51, 258));
-		util.add(new Vector(-312, 51, 258));
-		util.add(new Vector(-311, 52, 258));
-		//3
-		util.add(new Vector(-295, 49, 243));
-		util.add(new Vector(-295, 50, 243));
-		util.add(new Vector(-295, 51, 243));
-		util.add(new Vector(-295, 49, 242));
-		util.add(new Vector(-295, 50, 242));
-		util.add(new Vector(-295, 51, 242));
-		util.add(new Vector(-295, 52, 242));
-		util.add(new Vector(-295, 49, 241));
-		util.add(new Vector(-295, 50, 241));
-		util.add(new Vector(-295, 51, 241));
-		//4
-		util.add(new Vector(-310, 49, 226));
-		util.add(new Vector(-310, 50, 226));
-		util.add(new Vector(-310, 51, 226));
-		util.add(new Vector(-311, 49, 226));
-		util.add(new Vector(-311, 50, 226));
-		util.add(new Vector(-311, 51, 226));
-		util.add(new Vector(-311, 52, 226));
-		util.add(new Vector(-312, 49, 226));
-		util.add(new Vector(-312, 50, 226));
-		util.add(new Vector(-312, 51, 226));
-		for (Vector v : util){
-			Location loc = new Location(Bukkit.getWorld("PrisonMap"), v.getX(), v.getY(), v.getZ());
+		
+		for (Vector v : (Collection<? extends Vector>) Files.getDataFile().getList(arena + "fences")){
+			Location loc = new Location(Bukkit.getWorld("Flat"), v.getX(), v.getY(), v.getZ());
 			loc.getBlock().setType(Material.AIR);
 			ParticleEffect.BLOCK_CRACK.display(new ParticleEffect.BlockData(Material.WOOD, (byte)0), 0.2f, 0.2f, 0.2f, 0.2f, 15, loc.clone().add(0.5, 0.5, 0.5), 6);
 		}
 	}
 	
-	public static void Win(Player p){
-		Game.gs = GameState.WIN;
-		sendToAllPlus("§b✦§a-----------------------§b✦");
-		sendToAllPlus("");
-		sendToAllPlus("  §a§lWinner:");
+	public void Win(Player p, String arena){
+		gs.put(arena, GameState.WIN);
+		sendToAllPlus("§b✦§a-----------------------§b✦", arena);
+		sendToAllPlus("", arena);
+		sendToAllPlus("  §a§lWinner:", arena);
 		if (p == null){
-			sendToAllPlus("  §eWell... no-one won.");
+			sendToAllPlus("  §eWell... no-one won.", arena);
 		}else{
-			sendToAllPlus("  §l" + p.getName());
+			sendToAllPlus("  §l" + p.getName(), arena);
 		}
-		sendToAllPlus("");
-		sendToAllPlus("§b✦§a-----------------------§b✦");
+		sendToAllPlus("", arena);
+		sendToAllPlus("§b✦§a-----------------------§b✦", arena);
 		if (p != null){
+			luckyset.remove(p.getName());
 			int Wins = 0;
 			if (Files.getDataFile().contains("Players." + p.getUniqueId() + ".Wins")){
 				Wins = Files.getDataFile().getInt("Players." + p.getUniqueId() + ".Wins");
@@ -262,36 +252,36 @@ public class Game {
 			Files.getDataFile().set("Players." + p.getUniqueId() + ".Wins", Wins + 1);
 			Files.saveDataFile();
 			Stats.getStats(p).addGamesPlayed(1);
-			int needed = 0;
-			if (LetterType.getPlayerLetter(p) == LetterType.A){
-				needed = 2000;
-			}else{
-				needed = LetterType.getPlayerLetter(p).getNeeded().getMoney();
-			}
-			int amount = Math.round(needed / 30);
+			int amount = 6000;
 			p.sendMessage(ChatColor.GREEN + "+" + amount + "$");
-			MoneyAPI.addMoney(p, amount);
+			MoneyAPI.economy.depositPlayer(p.getName(), amount);
 		}
 	}
 	
 	@SuppressWarnings("deprecation")
-	public static void Die(Player p, Player killer){
+	public void Die(Player p, Player killer, String arena){
 		if (killer != null){
-			sendToAllPlus(Game.tag + "§c" + p.getName() + " §ewas killed by §c" + killer.getName() + "§e. §c" + (Game.ingame.size() - 1) + "§e players remain.");
+			sendToAllPlus(tag + "§c" + p.getName() + " §ewas killed by §c" + killer.getName() + "§e. §c" + (ingame.get(arena).size() - 1) + "§e players remain.", arena);
 		}else{
-			sendToAllPlus(Game.tag + "§c" + p.getName() + " §edied to an unknown cause. §c" + (Game.ingame.size() - 1) + "§e players remain.");
+			sendToAllPlus(tag + "§c" + p.getName() + " §edied to an unknown cause. §c" + (ingame.get(arena).size() - 1) + "§e players remain.", arena);
 		}
-		Game.ingame.remove(p.getName());
+		List<String> list1 = ingame.get(arena);
+		list1.remove(p.getName());
+		ingame.put(arena, list1);
 		for (ItemStack item : p.getInventory().getContents()){
 			if (item != null && item.getType() != Material.AIR){
 				Item util = p.getWorld().dropItem(p.getLocation().clone().add(0, 0.2, 0), item);
-				items.add(util.getUniqueId());
+				List<UUID> list = items.get(arena);
+				list.add(util.getUniqueId());
+				items.put(arena, list);
 			}
 		}
 		for (ItemStack item : p.getInventory().getArmorContents()){
 			if (item != null && item.getType() != Material.AIR){
 				Item util = p.getWorld().dropItem(p.getLocation().clone().add(0, 0.2, 0), item);
-				items.add(util.getUniqueId());
+				List<UUID> list = items.get(arena);
+				list.add(util.getUniqueId());
+				items.put(arena, list);
 			}
 		}
 		ParticleEffect.BLOCK_CRACK.display(new ParticleEffect.BlockData(Material.REDSTONE_BLOCK, (byte)0), 0.2f, 0.7f, 0.2f, 0.0f, 200, p.getLocation().clone().add(0, 0.25, 0), 20);
@@ -303,8 +293,8 @@ public class Game {
 		t.send(p);	
 		p.setHealth(p.getMaxHealth());
 		p.setVelocity(new Vector(0, 0, 0));
-		p.teleport(getLocation("Lobby"));
-		SpeedTrait.setCorrectSpeed(p);
+		p.teleport(getLocation("Lobby", arena));
+		p.setFireTicks(0);
 		p.getInventory().clear();
 		p.getInventory().clear();
 		p.getInventory().setBoots(null);
@@ -315,15 +305,14 @@ public class Game {
 		p.removePotionEffect(PotionEffectType.HEALTH_BOOST);
 		p.removePotionEffect(PotionEffectType.REGENERATION);
 		p.removePotionEffect(PotionEffectType.ABSORPTION);
-		p.getInventory().setContents(Game.invs.get(p.getName()));
-		p.getInventory().setArmorContents(Game.armors.get(p.getName()));
-		p.setExp(Game.xp.get(p.getName()));
-		p.setLevel(Game.xpl.get(p.getName()));
+		p.getInventory().setContents(invs.get(p.getName()));
+		p.getInventory().setArmorContents(armors.get(p.getName()));
+		p.setExp(xp.get(p.getName()));
+		p.setLevel(xpl.get(p.getName()));
 		p.updateInventory();		
-		InfoBoard.setBoardFor(p);
 		Stats.getStats(p).addGamesPlayed(1);
-		if (Game.damageamount.containsKey(p.getName())){
-		for (Entry<String,Double> e : Game.damageamount.get(p.getName()).entrySet()){
+		if (damageamount.containsKey(p.getName())){
+		for (Entry<String,Double> e : damageamount.get(p.getName()).entrySet()){
 			if (Bukkit.getPlayer(e.getKey()) != null){
 				Player util = Bukkit.getPlayer(e.getKey());
 				double d = e.getValue() * 0.4;
@@ -345,45 +334,50 @@ public class Game {
 						util.sendMessage("§c§l+ " + real + " ❤ §7(Killed player)");
 					}
 				}else{
-					util.sendMessage("§c§l+ " + real + " ❤ §7(Helped to kill player)"); 
+					util.sendMessage("§c§l+ " + real + " â�¤ §7(Helped to kill player)"); 
 				}
 			}
 		}
-		Game.damageamount.remove(p.getName());
+		damageamount.remove(p.getName());
+		luckyset.remove(p.getName());
+		invs.remove(p.getName());
+		armors.remove(p.getName());
+		xp.remove(p.getName());
+		xpl.remove(p.getName());
 		}
 		if (killer != null){
-			int needed = 0;
 			killer.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 70, 1));
 			Stats.getStats(killer).addKills(1);
-			if (LetterType.getPlayerLetter(killer) == LetterType.A){
-				needed = 2000;
-			}else{
-				needed = LetterType.getPlayerLetter(killer).getNeeded().getMoney();
-			}
-			int amount = Math.round(needed / 40);
+			int amount = 1000;
 			killer.sendMessage(ChatColor.GREEN + "+" + amount + "$");
-			MoneyAPI.addMoney(killer, amount);
-		}
-		if (!Game.watching.contains(p.getName())){
-			Game.watching.add(p.getName());
+			MoneyAPI.economy.depositPlayer(killer.getName(), amount);
 		}
 	}
 	
-	public static boolean playerInGame(Player p){
-		if (ingame.contains(p.getName())){
-			return true;
+	public boolean playerInGame(Player p){
+		for (Entry<String,List<String>> e : ingame.entrySet()){
+			if (e.getValue().contains(p.getName())){
+				return true;
+			}
 		}
 		return false;
 	}
 	
-	public static void playSound(Sound s, Location loc, float pitch, float level){
-		for (String s1 : Game.ingame){
+	public void playSound(Sound s, Location loc, float pitch, float level, String arena){
+		List<String> sent = new ArrayList<>();
+		for (String s1 : ingame.get(arena)){
 			Player p = Bukkit.getPlayer(s1);
 			p.playSound(loc, s, level, pitch);
+			sent.add(p.getName());
 		}
-		for (String s2 : Game.watching){
-			Player p = Bukkit.getPlayer(s2);
-			p.playSound(loc, s, level, pitch);
+		Location loc1 = getLocation("Mid", arena);
+		for (Player p : Bukkit.getOnlinePlayers()){
+			if (p.getWorld().getName().equals(loc1.getWorld().getName())){
+				if (p.getLocation().distance(loc1) < 35 && !sent.contains(p.getName())){
+					sent.add(p.getName());
+					p.playSound(loc, s, level, pitch);
+				}
+			}
 		}
 	}
 }
